@@ -1,0 +1,4 @@
+Project DescriptionA ‘whodunnit’ game that features 10 computer-generated players, one villain powered by artificial intelligence, and the protagonist. In a birthday party scenario, the lights periodically go off and a murder is committed. The protagonist must collect clues from other players to determine who is the villain. The villain must commit the murder at the optimal time and place to the most critical player in the protagonist’s future.
+Running the ProjectThe user should run the file tp3_v1.py in Visual Studio Code.
+ LibrariesThe user should have the modules names (https://pypi.org/project/names/) and uuid (https://www.geeksforgeeks.org/generating-random-ids-using-uuid-python/) installed.
+Shortcut CommandsTo move around the rooms, the user can press their mouse and drag.

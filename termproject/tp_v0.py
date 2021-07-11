@@ -1,0 +1,624 @@
+import module_manager
+module_manager.review()
+from cmu_112_graphics import *
+import names, uuid, random, math, copy
+import numpy as np
+import nltk
+
+#################################################
+# classes
+#################################################
+
+class Person(object):
+
+    people=[]
+
+    @staticmethod
+    def getRandomRGB():
+        return Person.rgbString(random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))
+    
+    # from https://www.cs.cmu.edu/~112/notes/notes-graphics.html
+    @staticmethod
+    def rgbString(r, g, b):
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def __init__(self, name, color, position, room, uid, highlight):
+        if(name==None): self.name=names.get_first_name()
+        else: self.name=name
+        if (color==None): self.color=Person.getRandomRGB()
+        else: self.color=color
+        if(position==None): self.position=random.randint(55, 625)
+        else: self.position=position
+        if(room==None): self.room=random.randint(0, 8)
+        else: self.room=room
+        if(uid==None): self.uid=str(uuid.uuid1())
+        else: self.uid=uid
+        if(highlight==None): self.highlight=False
+        else: self.highliight=highlight
+        Person.people.append(self)
+        self.information=[]
+    
+    def __repr__(self):
+        return f"Name: {self.name}\nColor: {self.color}\nPosition: {self.position}\nRoom: {self.room}\nUID: {self.uid}\nHighlight: {self.highlight}"
+    
+    def __eq__(self, other):
+        return (self.uid==other.uid)
+
+class Protagonist(Person):
+    # information should be in the form of a dictionary, with the keys as the num for the murder 
+    # and the values a list of all information objects from that murder
+    def __init__(self, name, color, position, room, uid, highlight):
+        super().__init__(name, color, position, room, uid, highlight)
+        self.position=300
+        self.room=2
+        self.name="Me"
+        self.suspects=set()
+        self.innocents=set()
+        self.unknowns=set()
+        self.information=dict()
+        #update this after every murder
+        self.currInfo=[]
+
+class Player(Person):
+    # information should be in the form of a dictionary, with the keys as the num for the murder 
+    # and the values a list of all information objects from that murder
+    def __init__(self, name, color, position, room, uid, highlight, friends, 
+        characteristics, gravity, gravityRoom, stationary, currFriendIndex, direction):
+        super().__init__(name, color, position, room, uid, highlight)
+
+        self.friends=friends
+        if(characteristics==None): self.characteristics=Characteristics(None, None, None)
+        else: self.characteristics=characteristics
+        self.information=dict()
+        self.gravity=self.position
+        self.gravityRoom=self.room
+        if(stationary==None): self.stationary=False
+        else: self.stationary=stationary
+        if(currFriendIndex==None): self.currFriendIndex=-1
+        else: self.currFriendIndex=currFriendIndex
+        if(direction==None): self.direction=1
+        else: self.direction=direction
+        self.alive=True
+    
+    def __repr__(self):
+        return f"Name: {self.name}\nColor: {self.color}\nPosition: {self.position}\nRoom: {self.room}\nUID: {self.uid}\nFriends: {self.friends}\nCharacteristics: {self.characteristics}\nInfo: {self.info}\nHighlight: {self.highlight}\nGravity: {self.gravity}\nStationary: {self.stationary}"
+
+class Villain(Player):
+    def __init__(self, name, color, position, room, uid, highlight, friends, characteristics, 
+        gravity, gravityRoom, stationary, currFriendIndex, direction, lastKillTimeSeconds):
+        super().__init__(name, color, position, room, uid, highlight, friends, characteristics, gravity, gravityRoom, stationary, currFriendIndex, direction)
+        if(lastKillTimeSeconds==None): self.lastKillTimeSeconds=random.randint(-110, -90)
+        else: self.lastKillTimeSeconds=lastKillTimeSeconds
+        self.murders=[]
+
+class Characteristics(object):
+    def __init__(self, talkativeness, distractedness, suspicion):
+        if(talkativeness==None): self.talkativeness=random.choice(range(0, 100))/100
+        else: self.talkativeness=talkativeness
+        if(distractedness==None): self.distractedness=random.choice(range(0, 100))/100
+        else: self.distractedness=distractedness
+        if(suspicion==None): self.suspicion=random.choice(range(0, 100))/100
+        else: self.suspicion=suspicion
+    
+    def __repr__(self):
+        return f"Talkativeness: {self.talkativeness}\nDistractedness: {self.distractedness}\nSuspicion: {self.suspicion}"
+
+class Murder(object):
+    def __init__(self, victim, peopleInRoom, room):
+        self.victim=victim
+        self.peopleInRoom=peopleInRoom
+
+class LogicPathObject(object):
+    def __init__(self, personUid, information):
+        self.personUid=personUid
+        self.information=information
+
+class Information(object):
+    # innocent should be None if don't know, and true if know
+    def __init__(self, numMurder, personUid, room, innocent, givenBy):
+        self.numMurder=numMurder
+        self.personUid=personUid
+        self.room=room
+        self.innocent=innocent
+        self.givenBy=givenBy
+
+#################################################
+# app, based from cmu_112_graphics.py
+#################################################
+
+rooms=["Foyer", "Kitchen", "Living Room", "Family Room", "Bedroom", "Study",  "Garage", "Conservatory"]
+
+# from https://www.cs.cmu.edu/~112/notes/notes-2d-lists.html, added value parameter
+def make2dList(rows, cols, value):
+    return [ ([value] * cols) for row in range(rows) ]
+
+def appStarted(app):
+    app.protag=Protagonist(None, None, None, None, None, None)
+    app.numPlayers=10
+    app.players=dict()
+
+    for _ in range(app.numPlayers):
+        player=Player(None, None, None, None, None, None, None, None, None, None, None, None, None)
+        app.players[player.uid]=player
+
+    for uid in app.players:
+        app.protag.unknowns.add(uid)
+        num=random.randint(0, len(app.players))
+        app.players[uid].friends=random.sample(app.players.keys(), num)
+        if(app.players[uid].uid in app.players[uid].friends):
+            app.players[uid].friends.remove(app.players[uid].uid)
+
+    app.villain=Villain(None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+
+    app.radius=30
+    app.border=30
+    app.ground=app.height-app.border-100
+    app.room=2
+    app.pressed=False
+    app.paused=False
+    app.mouseX=-1
+    app.mouseY=-1
+    app.timerDelay=10
+    app.deciseconds=0
+    app.secondsPassed=0
+    app.minUid=None
+    app.showSettings=False
+    app.showMap=False
+    app.showReportMurderer=False
+    app.showChat=False
+    app.chatSelected=False
+    app.chatString=""
+    app.lastMessageTime=None
+    app.protagMessage=""
+    app.otherMessage=""
+
+    app.settingsWidth=300
+    app.settingsHeight=100
+
+    app.chatWidth=500
+    app.chatHeight=400
+
+    # from https://material.io/resources/icons/
+    app.settingsImage=app.scaleImage(app.loadImage('https://i.ibb.co/fDXjVPB/settings.png'), 1)
+    app.mapImage=app.scaleImage(app.loadImage('https://i.ibb.co/hHfg4YD/baseline-room-black-18dp.png'), 1)
+    app.reportImage=app.scaleImage(app.loadImage('https://i.ibb.co/mHr3Gv1/baseline-report-black-18dp.png'), 1)
+    app.closeImage=app.scaleImage(app.loadImage('https://i.ibb.co/CHb1WgL/baseline-cancel-white-18dp.png'), 1)
+
+# call this after every conversation with a person, and call this with newInformation=[] after the death of someone
+# numMurder should be the index of the current murder in the villain's list
+def updateProtagList(app, newInformation, numMurder):
+    murder=app.villain.murders[numMurder]
+    for player in app.players:
+        if(not player.alive):
+            app.protag.innocents.add(player.uid)
+    for info in newInformation:
+        if(app.players[info.personUid].alive):
+            if(info.innocent==True):
+                app.protag.innocents.add(info.personUid)
+            elif(info.room==murder.room and info.personUid not in app.protag.innocents):
+                app.protag.suspects.add(info.personUid)
+            elif(info.personUid not in app.protag.innocents and info.personUid not in app.protag.suspects):
+                app.protag.unknowns.add(info.personUid)
+    
+    app.protag.suspects.difference(app.protag.innocents)
+    app.protag.unknowns.difference(app.protag.innocents)
+    app.protag.unknowns.difference(app.protag.suspects)
+
+# knownInformation here should be a list with the protagonist's most recent information
+# see if you can make ONE function from this and the above function?
+def checkIfInfoRevealsMurderer(app, knownInformation, numMurder):
+    murder=app.villain.murders[numMurder]
+    innocents, suspects, unknowns=app.protag.innocents, app.protag.suspects, app.protag.unknowns
+    
+    for info in knownInformation:
+        if(app.players[info.personUid].alive):
+            if(info.innocent==True):
+                innocents.add(info.personUid)
+            elif(info.room==murder.room and info.personUid not in innocents):
+                suspects.add(info.personUid)
+            elif(info.personUid not in innocents and info.personUid not in suspects):
+                unknowns.add(info.personUid)
+    
+    suspects.difference(innocents)
+    unknowns.difference(innocents)
+    unknowns.difference(suspects)
+
+    if(len(unknowns)==0 and len(suspects)==1 and suspects[0]==app.villain.uid): return True
+    else: return False
+
+def getAlivePlayersLeft(players):
+    num=0
+    for player in players:
+        if(player.alive):
+            num+=1
+    return num
+
+# currPath's initial info should have the new info in a list
+# playersDone should be a list of the players uid when gone through once in this path, initially []
+# currMurder should be which murder we're currently on
+def getPathsForPlayerToFindMurderer(app, currInfo, playersDone, currMurder, players):
+    #Base Case
+    if(checkIfInfoRevealsMurderer(app, currInfo, currMurder)):
+        return playersDone
+    elif(len(playersDone)==getAlivePlayersLeft(players)):
+        return None
+    #Recursive Case
+    else:
+        workingPaths=[]
+        for uid in players:
+            if(players[uid].alive and uid not in playersDone):
+                newPlayersDone=playersDone+[uid]
+                information=players[uid].information[currMurder]
+                for info in information:
+                    newCurrInfo=copy.deepcopy(currInfo)
+                    if(len(currInfo) not in currInfo): newCurrInfo[len(newCurrInfo)]=[info]
+                    else: newCurrInfo[len(newCurrInfo)].append(info)
+                    returned=getPathsForPlayerToFindMurderer(app, newCurrInfo, newPlayersDone, currMurder)
+                    if(returned!=None):
+                        workingPaths+=[returned]
+        return workingPaths
+
+def decideTheNextKill(app):
+    pass
+
+def kill(app, person):
+    # if protag is there, wait for them to leave, then go to the room, turn lights off, kill, 
+    # turn light back on (MAKE SURE PROTAG IS NOT IN NEXT ROOM)
+    pass
+
+def eventInBoundaries(x, y, x0, y0):
+    return (x0-20<=x<=x0+20) and (y0-20<=y<=y0+20)
+
+# add feature to slow player's movement when surrounded by more people
+# WHY are players randomly stopping and piling on top of each other
+
+def movePlayerTowardsRoom(app, player):
+    if(player.room!=player.gravityRoom):
+        if(player.position<=app.border+app.radius):
+            if(player.room!=0):
+                player.room-=1
+                player.position=app.width-app.border-app.radius-1
+        elif(player.position>=app.width-app.border-app.radius):
+            if(player.room!=7):
+                player.room+=1
+                player.position=app.border+app.radius+1
+        else:
+            if(player.gravityRoom>player.room):
+                player.position+=1
+            else:
+                player.position-=1
+    elif(abs(player.gravity-player.position)>180):
+        if(player.gravity>player.position):
+            player.position+=1
+        else:
+            player.position-=1
+
+def updateClosestPlayer(app):
+    if(not app.showChat):
+        minUid=None
+        minValue=None
+        for uid in app.players:
+            player=app.players[uid]
+            if(player.room==app.room):
+                diff=abs(app.protag.position-player.position)
+                if(diff<60):
+                    if(minValue==None or diff<minValue):
+                        minValue=diff
+                        minUid=uid
+        app.minUid=minUid
+
+def timerFired(app):
+    if(not app.paused and app.pressed and not app.showChat):
+        #move protag based on mouse movements
+        difference=abs(app.mouseX-app.protag.position)
+        if(app.mouseY>=app.border+100):
+            if(app.mouseX>app.protag.position and 
+                not app.protag.position>=app.width-app.border-app.radius):
+                app.protag.position+=(difference/120)*10
+            elif(app.mouseX<app.protag.position and 
+                not app.protag.position<=app.border+app.radius):
+                app.protag.position-=(difference/120)*10
+                
+        if(app.protag.position<=app.border+app.radius):
+            if(app.room!=0):
+                app.room-=1
+                app.protag.position=app.width-app.border-app.radius
+                app.pressed=False
+        elif(app.protag.position>=app.width-app.border-app.radius):
+            if(app.room!=7):
+                app.room+=1
+                app.protag.position=app.border+app.radius
+                app.pressed=False
+
+    if(not app.paused):
+        updateClosestPlayer(app)
+        #move other players
+        index=0
+        for uid in app.players:
+            index+=1
+            player=app.players[uid]
+            if(not player.stationary and player.alive):
+                #if it's time to change direction
+                if(app.secondsPassed%(20+(index*2))==0):
+                    num=player.currFriendIndex
+                    while(num==player.currFriendIndex):
+                        num=random.randint(0, len(player.friends))
+                    #hanging out with friend
+                    if(num<len(player.friends)):
+                        friend=app.players[player.friends[num]]
+                        diff=random.choice([50, -50])
+                        app.players[uid].gravity=friend.position+diff
+                        app.players[uid].gravityRoom=friend.room
+                        app.players[uid].currFriendIndex=num
+                    #hanging out at random place
+                    elif(num==len(player.friends)):
+                        app.players[uid].gravity=random.randint(55, 625)
+                        app.players[uid].gravityRoom=random.randint(0, 8)
+                        app.players[uid].currFriendIndex=-1
+                # move around 180 px near gravity
+                else:
+                    if(player.currFriendIndex!=-1):
+                        friend=app.players[player.friends[player.currFriendIndex]]
+                        diff=random.choice([50, -50])
+                        app.players[uid].gravity=friend.position+diff
+                        app.players[uid].gravityRoom=friend.room
+                    player=app.players[uid]
+                    if(abs(player.gravity-player.position)>180 or player.room!=player.gravityRoom):
+                        movePlayerTowardsRoom(app, player)
+                    else:
+                        if(player.position-player.gravity>150 or player.position>=app.width-app.border-app.radius):
+                            player.direction=-1
+                        elif(player.gravity-player.position>150 or player.position<=app.border+app.radius):
+                            player.direction=1
+                        player.position+=player.direction
+        
+        #checking if it's time to switch message
+        if(app.showChat and (app.lastMessageTime==None or app.secondsPassed-app.lastMessageTime==3)):
+            if(app.protagMessage!=""):
+                app.otherMessage=computeResponseToMessage(app)
+                app.lastMessageTime=app.secondsPassed
+                app.protagMessage=""
+            elif(app.otherMessage!=""):
+                app.otherMessage=""
+
+        #checking if it's time to kill
+        if((app.secondsPassed-app.villain.lastKillTimeSeconds)%60==0):
+            decideTheNextKill(app)
+    
+    app.deciseconds+=1
+    if(app.deciseconds%50==0):
+        app.secondsPassed+=1
+
+def mouseMoved(app, event):
+    if(not app.paused):
+        for uid in app.players:
+            player=app.players[uid]
+            if(player.position-app.radius<=event.x<=player.position+app.radius and
+                app.ground-(2*app.radius)-1<=event.y<=app.ground-1 and
+                player.room==app.room):
+                app.players[uid].highlight=True
+            else:
+                app.players[uid].highlight=False
+
+def mousePressed(app, event):
+    #check if clicked on settings
+    if(not app.showChat and eventInBoundaries(event.x, event.y, app.width-app.border-25, app.border+25)):
+        app.paused=not app.paused
+        app.showSettings=not app.showSettings
+
+    #checking if clicked on no restart game
+    if(not app.showChat and app.showSettings and 
+        (app.width/2)-(app.settingsWidth/2)<=event.x<=(app.width/2) and
+        (app.height/2)+(app.settingsHeight/2)-40<=event.y<=(app.height/2)+(app.settingsHeight/2)):
+        app.showSettings=False
+        app.paused=False
+
+    #checking if clicked on no restart game
+    if(not app.showChat and app.showSettings and 
+        (app.width/2)<=event.x<=(app.width/2)+(app.settingsWidth/2) and
+        (app.height/2)+(app.settingsHeight/2)-40<=event.y<=(app.height/2)+(app.settingsHeight/2)):
+        appStarted(app)
+
+    #check if clicked on map
+    if(not app.showChat and eventInBoundaries(event.x, event.y, app.border+25, app.border+25)):
+        app.paused=not app.paused
+        app.showMap=not app.showMap
+    
+    #check if clicked on report
+    if(not app.showChat and eventInBoundaries(event.x, event.y, app.border+65, app.border+25)):
+        app.paused=not app.paused
+        app.showReportMurderer=not app.showReportMurderer
+
+    #checking if clicked on another player
+    if(not app.paused):
+
+        #checking if say button is clicked
+        if(app.showChat and (app.width/2)+(app.chatWidth/2)-90<=event.x<=(app.width/2)+(app.chatWidth/2)-10 and
+            (app.height/2)+(app.chatHeight/2)-50<=event.y<=(app.height/2)+(app.chatHeight/2)-10):
+            app.lastMessageTime=app.secondsPassed
+            app.protagMessage=app.chatString
+            app.chatString=""
+
+        #checking if chat box is selected
+        if(app.showChat and (app.width/2)-(app.chatWidth/2)+10<=event.x<=(app.width/2)+(app.chatWidth/2)-90 and
+            (app.height/2)+(app.chatHeight/2)-50<=event.y<=(app.height/2)+(app.chatHeight/2)-10):
+            app.chatSelected=True
+        else:
+            app.chatSelected=False
+
+        #checking if clicked on talk button
+        if(not app.showChat and app.border<=event.x<=app.width-app.border and 
+            app.height-app.border-30<=event.y<=app.height-app.border and
+            app.minUid!=None):
+            app.showChat=True
+            app.players[app.minUid].stationary=True
+        
+        #checking if clicked on close talk button
+        if(app.showChat and eventInBoundaries(event.x, event.y, 
+            (app.width/2)-(app.chatWidth/2)+25, (app.height/2)-(app.chatHeight/2)+25)):
+            app.showChat=False
+            app.chatSelected=False
+            app.chatString=""
+
+        for uid in app.players:
+            player=app.players[uid]
+            if(player.position-app.radius<=event.x<=player.position+app.radius and
+                app.ground-(2*app.radius)-1<=event.y<=app.ground-1 and
+                player.room==app.room):
+                app.players[uid].stationary=True
+            else:
+                if(not app.showChat or app.minUid!=uid):
+                    app.players[uid].stationary=False
+
+    if(not app.paused):
+        app.mouseX=event.x
+        app.mouseY=event.y
+        app.pressed=True
+
+def mouseDragged(app, event):
+    if(not app.paused):
+        if(app.pressed):
+            app.mouseX=event.x
+            app.mouseY=event.y
+
+def computeResponseToMessage(app):
+    # should return a string response
+    pass
+
+def keyPressed(app, event):
+    if(app.chatSelected):
+        if(len(event.key)==1 and len(app.chatString)<65):
+            app.chatString+=event.key
+        elif(event.key=="Backspace" or event.key=="Delete"):
+            if(app.chatString!=""): 
+                app.chatString=app.chatString[:len(app.chatString)-1]
+        elif(event.key=="Space"):
+            app.chatString+=" "
+
+def drawPerson(app, canvas, person):
+    positionX=person.position
+    if(person.highlight):
+        canvas.create_oval(positionX-app.radius, app.ground-(2*app.radius)-1, 
+            positionX+app.radius, app.ground-1, fill=person.color, outline="black", width=2)
+    else:
+        canvas.create_oval(positionX-app.radius, app.ground-(2*app.radius)-1, 
+            positionX+app.radius, app.ground-1, fill=person.color, outline=person.color)
+    canvas.create_text(positionX, app.ground-(2*app.radius)-11, text=person.name)
+
+def drawTitle(app, canvas):
+    canvas.create_text(app.width/2, 20+app.border, text=rooms[app.room], font="Helvetica 20 bold")
+
+def drawBorder(app, canvas):
+    canvas.create_rectangle(app.border, app.border, app.width-app.border, app.height-app.border)
+
+def drawPlayers(app, canvas):
+    for uid in app.players:
+        player=app.players[uid]
+        if(player.room==app.room):
+            drawPerson(app, canvas, player)
+
+def drawSettingsButton(app, canvas):
+    canvas.create_image(app.width-app.border-25, app.border+25, 
+        image=ImageTk.PhotoImage(app.settingsImage))
+
+def drawMapButton(app, canvas):
+    canvas.create_image(app.border+25, app.border+25, 
+        image=ImageTk.PhotoImage(app.mapImage))
+
+def drawReportButton(app, canvas):
+    canvas.create_image(app.border+65, app.border+25, 
+        image=ImageTk.PhotoImage(app.reportImage))
+
+def drawTalkButton(app, canvas, person):
+    canvas.create_text(app.width/2, app.height-app.border-15, text=f"TALK TO {person.name}".upper(), fill="white")
+
+def drawChatBubbles(app, canvas):
+    if(app.protagMessage!=""):
+        pass
+    elif(app.otherMessage!=""):
+        pass
+
+def drawChatInterface(app, canvas):
+    canvas.create_rectangle((app.width/2)-(app.chatWidth/2), (app.height/2)-(app.chatHeight/2), 
+        (app.width/2)+(app.chatWidth/2), (app.height/2)+(app.chatHeight/2), fill="white")
+    canvas.create_rectangle((app.width/2)-(app.chatWidth/2), (app.height/2)-(app.chatHeight/2), 
+        (app.width/2)+(app.chatWidth/2), (app.height/2)-(app.chatHeight/2)+50, fill="darkgreen")
+    canvas.create_text(app.width/2, (app.height/2)-(app.chatHeight/2)+25, 
+        text=f"TALK TO {app.players[app.minUid].name}".upper(), fill="white", font="Helvetica 15")
+    canvas.create_image((app.width/2)-(app.chatWidth/2)+25, (app.height/2)-(app.chatHeight/2)+25, 
+        image=ImageTk.PhotoImage(app.closeImage))
+
+    ground=(app.height/2)+(app.chatHeight/2)-100
+    canvas.create_line((app.width/2)-(app.chatWidth/2), ground, 
+        (app.width/2)+(app.chatWidth/2), ground)
+
+    positionMe=(app.width/2)-(app.chatWidth/2)+80
+    canvas.create_oval(positionMe-app.radius, ground-(2*app.radius)-1, 
+            positionMe+app.radius, ground-1, fill=app.protag.color, outline=app.protag.color)
+    canvas.create_text(positionMe, ground+10, text=app.protag.name)
+
+    positionOther=(app.width/2)+(app.chatWidth/2)-80
+    canvas.create_oval(positionOther-app.radius, ground-(2*app.radius)-1, 
+            positionOther+app.radius, ground-1, fill=app.players[app.minUid].color, outline=app.players[app.minUid].color)
+    canvas.create_text(positionOther, ground+10, text=app.players[app.minUid].name)
+
+    canvas.create_rectangle((app.width/2)-(app.chatWidth/2)+10, (app.height/2)+(app.chatHeight/2)-50, 
+        (app.width/2)+(app.chatWidth/2)-90, (app.height/2)+(app.chatHeight/2)-10, outline="black" if app.chatSelected else "darkgrey")
+    canvas.create_text((((app.width/2)-(app.chatWidth/2)+10)+((app.width/2)+(app.chatWidth/2)-90))/2, 
+        (((app.height/2)+(app.chatHeight/2)-50)+((app.height/2)+(app.chatHeight/2)-10))/2, text=app.chatString, fill="black")
+    if(len(app.chatString)==65):
+        canvas.create_text((((app.width/2)-(app.chatWidth/2)+10)+((app.width/2)+(app.chatWidth/2)-90))/2, 
+        (app.height/2)+(app.chatHeight/2)-70, text="Maximum message length met.", fill="black")
+
+    canvas.create_rectangle((app.width/2)+(app.chatWidth/2)-90, (app.height/2)+(app.chatHeight/2)-50, 
+        (app.width/2)+(app.chatWidth/2)-10, (app.height/2)+(app.chatHeight/2)-10, fill="darkgreen", outline="darkgreen")
+    canvas.create_text((app.width/2)+(app.chatWidth/2)-50, (app.height/2)+(app.chatHeight/2)-30, text="SAY", fill="white")
+
+    drawChatBubbles(app, canvas)
+
+def drawSettingsInterface(app, canvas):
+    canvas.create_rectangle((app.width/2)-(app.settingsWidth/2), (app.height/2)-(app.settingsHeight/2), 
+        (app.width/2)+(app.settingsWidth/2), (app.height/2)+(app.settingsHeight/2), fill="white")
+    canvas.create_text(app.width/2, (app.height/2)-(app.settingsHeight/2)+30, text="Restart game?")
+    canvas.create_rectangle((app.width/2)-(app.settingsWidth/2), (app.height/2)+(app.settingsHeight/2)-40, 
+        (app.width/2), (app.height/2)+(app.settingsHeight/2), fill="darkgreen")
+    canvas.create_text((app.width/2)-(app.settingsWidth/4), 
+        (app.height/2)+(app.settingsHeight/2)-20, fill="white", text="NO")
+    canvas.create_rectangle((app.width/2), (app.height/2)+(app.settingsHeight/2)-40, 
+        (app.width/2)+(app.settingsWidth/2), (app.height/2)+(app.settingsHeight/2), fill="darkgreen")
+    canvas.create_text((app.width/2)+(app.settingsWidth/4), 
+        (app.height/2)+(app.settingsHeight/2)-20, fill="white", text="YES")
+
+def drawReportMurdererInterface(app, canvas):
+    #this should have all of the colors and names listed and the protag can select one, they get 2 (or 3?) tries
+    pass
+
+def redrawAll(app, canvas):
+    canvas.create_line(app.border, app.ground, app.width-app.border, app.ground)
+    drawPerson(app, canvas, app.protag)
+    drawTitle(app, canvas)
+    drawBorder(app, canvas)
+    drawPlayers(app, canvas)
+    drawSettingsButton(app, canvas)
+    drawMapButton(app, canvas)
+    drawReportButton(app, canvas)
+    canvas.create_rectangle(app.border, app.height-app.border-30, app.width-app.border, app.height-app.border, fill="black")
+
+    if(app.minUid!=None):
+        drawTalkButton(app, canvas, app.players[app.minUid])
+    if(app.showChat):
+        drawChatInterface(app, canvas)
+    if(app.showSettings):
+        drawSettingsInterface(app, canvas)
+    if(app.showReportMurderer):
+        drawReportMurdererInterface(app, canvas)
+
+#################################################
+# main
+#################################################
+
+def main():
+    runApp(width=680, height=480)
+
+if __name__ == '__main__':
+    main()
